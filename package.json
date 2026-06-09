@@ -1,0 +1,31 @@
+{
+  "name": "deep-research-agent",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsc",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "eval": "tsx eval/runner.ts",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@aws-sdk/client-bedrock-runtime": "latest",
+    "zod": "^3.23",
+    "pino": "^9",
+    "pino-pretty": "^11",
+    "cheerio": "^1.0",
+    "mathjs": "^13",
+    "compromise": "^14",
+    "pdf-parse": "^1.1",
+    "dotenv": "^16"
+  },
+  "devDependencies": {
+    "typescript": "^5.5",
+    "tsx": "^4",
+    "vitest": "^2",
+    "@types/node": "^20",
+    "@types/pdf-parse": "^1.1"
+  }
+}

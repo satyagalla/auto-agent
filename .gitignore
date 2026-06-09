@@ -1,0 +1,20 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+
+# Environment & secrets
+.env
+
+# Runtime output (generated per session)
+traces/
+output/
+eval/results/
+*.log
+
+# Dev scratch
+scratchpad.txt
+
+# IDE / tool config
+.claude/
