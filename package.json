@@ -27,5 +27,8 @@
     "vitest": "^2",
     "@types/node": "^20",
     "@types/pdf-parse": "^1.1"
+  },
+  "pnpm": {
+    "allowBuild": ["esbuild"]
   }
 }
