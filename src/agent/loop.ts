@@ -100,7 +100,7 @@ export async function runAgent(question: string): Promise<string> {
         { role: 'user', content: beastPrompt },
       ];
       const response = await provider.chat(systemPrompt, beastMessages, [], { maxTokens: 8192 });
-      budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens);
+      budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
       const textBlocks = response.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[];
       const report = textBlocks.map(b => b.text).join('\n');
       logger.info({ path: saveReport(sessionId, question, report) }, 'Report saved');
@@ -108,7 +108,7 @@ export async function runAgent(question: string): Promise<string> {
     }
 
     const response = await provider.chat(systemPrompt, trimmedMessages, llmTools, { maxTokens: 4096 });
-    budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens);
+    budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
     budget.recordStep();
 
     const step = budgetStatus.stepsTaken + 1;
@@ -121,6 +121,8 @@ export async function runAgent(question: string): Promise<string> {
         stopReason: response.stop_reason,
         toolCalls: toolUseBlocks.map(b => b.name),
         tokensThisCall: response.usage.input_tokens + response.usage.output_tokens,
+        cacheReadTokens: response.usage.cache_read_tokens,
+        cacheWriteTokens: response.usage.cache_write_tokens,
         tokensTotal: budget.tokensSpent,
       },
       'Agent step'
@@ -181,6 +183,7 @@ export async function runAgent(question: string): Promise<string> {
     [],
     { maxTokens: 8192 }
   );
+  budget.recordTokens(finalResponse.usage.input_tokens, finalResponse.usage.output_tokens, finalResponse.usage.cache_read_tokens, finalResponse.usage.cache_write_tokens);
   const finalText = finalResponse.content
     .filter(b => b.type === 'text')
     .map(b => (b as { type: 'text'; text: string }).text)

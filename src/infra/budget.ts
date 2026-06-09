@@ -21,8 +21,11 @@ export class BudgetTracker {
     this.reserveTokens = Math.floor(tokenBudget * (reservePercent / 100));
   }
 
-  recordTokens(input: number, output: number): void {
-    this._tokensSpent += input + output;
+  // Bedrock reports inputTokens EXCLUSIVE of cache tokens (cache fields are additive).
+  // Cache reads cost 0.1x, writes cost 1.25x — but input already counts cacheWrite at 1x,
+  // so only add the 0.25x surcharge for writes.
+  recordTokens(input: number, output: number, cacheRead = 0, cacheWrite = 0): void {
+    this._tokensSpent += output + input + (cacheRead * 0.1) + (cacheWrite * 0.25);
   }
 
   recordStep(): void {

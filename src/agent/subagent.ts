@@ -55,7 +55,8 @@ export async function spawnSubagent(params: {
   }));
 
   const provider = new BedrockProvider();
-  const systemPrompt = buildSubagentPrompt(params.subtopic, params.parentQuestion, params.visitedUrls ?? []);
+  // Subagent prompt is fully dynamic (subtopic/question/urls change every call) — no caching
+  const systemPrompt = { static: buildSubagentPrompt(params.subtopic, params.parentQuestion, params.visitedUrls ?? []), noCachePoints: true };
   const messages: LLMMessage[] = [
     { role: 'user', content: `Research this subtopic: ${params.subtopic}` },
   ];
@@ -65,7 +66,7 @@ export async function spawnSubagent(params: {
 
   while (!budget.isExhausted && steps < (params.maxSteps ?? config.subagent.maxSteps)) {
     const response = await provider.chat(systemPrompt, messages, llmTools, { maxTokens: 2048 });
-    budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens);
+    budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
     budget.recordStep();
     steps++;
 
