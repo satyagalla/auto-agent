@@ -30,15 +30,26 @@ export interface ToolDefinition {
   input_schema: object;
 }
 
+export interface SystemPrompt {
+  static: string;
+  dynamic?: string;
+  noCachePoints?: boolean;
+}
+
 export interface LLMResponse {
   content: ContentBlock[];
   stop_reason: 'end_turn' | 'tool_use' | 'max_tokens';
-  usage: { input_tokens: number; output_tokens: number };
+  usage: {
+    input_tokens: number;
+    output_tokens: number;
+    cache_read_tokens: number;
+    cache_write_tokens: number;
+  };
 }
 
 export interface LLMProvider {
   chat(
-    systemPrompt: string,
+    system: SystemPrompt,
     messages: LLMMessage[],
     tools: ToolDefinition[],
     options?: { maxTokens?: number }

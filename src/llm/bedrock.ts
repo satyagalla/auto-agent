@@ -1,6 +1,7 @@
 import {
   BedrockRuntimeClient,
   ConverseCommand,
+  type ConverseCommandInput,
   type Message,
   type ContentBlock as BedrockContentBlock,
   type Tool,
@@ -10,7 +11,7 @@ import { config } from '../infra/config.js';
 import { withRetry } from '../infra/retry.js';
 import { rateLimiters } from '../infra/rate-limiter.js';
 import { NetworkError, RateLimitError, ApiError } from '../infra/errors.js';
-import type { LLMProvider, LLMMessage, LLMResponse, ToolDefinition, ContentBlock } from './provider.js';
+import type { LLMProvider, LLMMessage, LLMResponse, ToolDefinition, ContentBlock, SystemPrompt } from './provider.js';
 
 export class BedrockProvider implements LLMProvider {
   private client: BedrockRuntimeClient;
@@ -30,7 +31,7 @@ export class BedrockProvider implements LLMProvider {
   }
 
   async chat(
-    systemPrompt: string,
+    system: SystemPrompt,
     messages: LLMMessage[],
     tools: ToolDefinition[],
     options?: { maxTokens?: number }
@@ -48,11 +49,24 @@ export class BedrockProvider implements LLMProvider {
         },
       }));
 
+      // Cache static system + tools only when dynamic content follows the cache point
+      // (a trailing cachePoint with nothing after it is semantically wrong).
+      // noCachePoints disables caching entirely for callers with fully dynamic prompts.
+      const useCache = !system.noCachePoints && !!system.dynamic;
+      const systemBlocks = useCache
+        ? [{ text: system.static }, { cachePoint: { type: 'default' as const } }, { text: system.dynamic! }]
+        : [{ text: system.static + (system.dynamic ? '\n\n' + system.dynamic : '') }];
+
       const command = new ConverseCommand({
         modelId: config.model,
-        system: [{ text: systemPrompt }],
+        system: systemBlocks as ConverseCommandInput['system'],
         messages: bedrockMessages,
-        toolConfig: tools.length > 0 ? { tools: bedrockTools } : undefined,
+        toolConfig: tools.length > 0
+          ? {
+              tools: bedrockTools,
+              ...(useCache ? { cachePoint: { type: 'default' as const } } : {}),
+            } as ConverseCommandInput['toolConfig']
+          : undefined,
         inferenceConfig: {
           maxTokens: options?.maxTokens ?? 4096,
         },
@@ -106,6 +120,8 @@ export class BedrockProvider implements LLMProvider {
         usage: {
           input_tokens: response.usage?.inputTokens ?? 0,
           output_tokens: response.usage?.outputTokens ?? 0,
+          cache_read_tokens: response.usage?.cacheReadInputTokens ?? 0,
+          cache_write_tokens: response.usage?.cacheWriteInputTokens ?? 0,
         },
       };
     });
