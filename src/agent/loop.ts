@@ -4,7 +4,9 @@ import { BudgetTracker } from '../infra/budget.js';
 import { ArtifactStore } from '../store/artifacts.js';
 import { KnowledgeStore } from '../store/knowledge.js';
 import { PlanStore } from '../store/plan.js';
-import { createChildLogger } from '../infra/logger.js';
+import { createSessionLogger } from '../infra/logger.js';
+import { writeFileSync, mkdirSync, existsSync } from 'fs';
+import { join } from 'path';
 import { registry } from '../tools/registry.js';
 import { registerAllTools } from '../tools/register-all.js';
 import { executeTool } from '../tools/executor.js';
@@ -17,6 +19,14 @@ function generateSessionId(): string {
   return `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
+function saveReport(sessionId: string, question: string, report: string): string {
+  const dir = join(process.cwd(), 'traces', sessionId);
+  if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  const path = join(dir, 'report.md');
+  writeFileSync(path, `# Research Report\n\n**Question:** ${question}\n\n---\n\n${report}`, 'utf-8');
+  return path;
+}
+
 interface RecentCall {
   name: string;
   input: string;
@@ -27,7 +37,7 @@ export async function runAgent(question: string): Promise<string> {
   registerAllTools();
 
   const sessionId = generateSessionId();
-  const logger = createChildLogger({ sessionId });
+  const logger = createSessionLogger(sessionId, { sessionId });
   const artifactStore = new ArtifactStore(sessionId);
   const knowledgeStore = new KnowledgeStore();
   const planStore = new PlanStore();
@@ -92,7 +102,9 @@ export async function runAgent(question: string): Promise<string> {
       const response = await provider.chat(systemPrompt, beastMessages, [], { maxTokens: 8192 });
       budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens);
       const textBlocks = response.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[];
-      return textBlocks.map(b => b.text).join('\n');
+      const report = textBlocks.map(b => b.text).join('\n');
+      logger.info({ path: saveReport(sessionId, question, report) }, 'Report saved');
+      return report;
     }
 
     const response = await provider.chat(systemPrompt, trimmedMessages, llmTools, { maxTokens: 4096 });
@@ -118,7 +130,7 @@ export async function runAgent(question: string): Promise<string> {
     if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) {
       const finalText = textBlocks.map(b => b.text).join('\n');
       if (finalText.trim()) {
-        logger.info({ step }, 'Agent completed research naturally');
+        logger.info({ step, path: saveReport(sessionId, question, finalText) }, 'Agent completed research naturally');
         return finalText;
       }
       // If no text, continue loop (model might have just not produced output yet)
@@ -173,5 +185,7 @@ export async function runAgent(question: string): Promise<string> {
     .filter(b => b.type === 'text')
     .map(b => (b as { type: 'text'; text: string }).text)
     .join('\n');
-  return finalText || 'Research session ended without producing a report.';
+  const result = finalText || 'Research session ended without producing a report.';
+  logger.info({ path: saveReport(sessionId, question, result) }, 'Report saved');
+  return result;
 }
