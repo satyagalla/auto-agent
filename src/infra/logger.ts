@@ -31,8 +31,8 @@ export function createSessionLogger(sessionId: string, context: Record<string, u
           level,
         },
         {
-          target: 'pino/file',
-          options: { destination: logPath, append: true },
+          target: 'pino-pretty',
+          options: { colorize: false, ignore: 'pid,hostname', destination: logPath, append: true },
           level,
         },
       ],
