@@ -41,7 +41,7 @@ export const config = {
   github: {
     token: process.env.GITHUB_TOKEN ?? '',
   },
-  model: 'us.anthropic.claude-sonnet-4-5-20251001-v1:0',
+  model: 'us.anthropic.claude-sonnet-4-6',
   maxSteps: 50,
   tokenBudget: 200_000,
   budgetReservePercent: 15,
