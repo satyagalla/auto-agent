@@ -33,7 +33,18 @@ interface RecentCall {
   count: number;
 }
 
-export async function runAgent(question: string): Promise<string> {
+export interface AgentResult {
+  report: string;
+  sessionId: string;
+  steps: number;
+  tokens: number;
+  toolCalls: number;
+  plan: { subtasks: { description: string; status: string }[] } | null;
+}
+
+export async function runAgent(question: string): Promise<string>;
+export async function runAgent(question: string, opts: { returnMetadata: true }): Promise<AgentResult>;
+export async function runAgent(question: string, opts?: { returnMetadata?: boolean }): Promise<string | AgentResult> {
   registerAllTools();
 
   const sessionId = generateSessionId();
@@ -78,6 +89,31 @@ export async function runAgent(question: string): Promise<string> {
   }
 
   let lastInputTokens = 0;
+  let totalToolCalls = 0;
+
+  function finish(report: string, reportPath: string): string | AgentResult {
+    const s = budget.getStatus();
+    logger.info(
+      {
+        steps: s.stepsTaken,
+        tokens: Math.round(s.tokensSpent),
+        budget: config.tokenBudget,
+        toolCalls: totalToolCalls,
+        reportPath,
+      },
+      `Session complete — ${s.stepsTaken} steps | ${Math.round(s.tokensSpent).toLocaleString()} tokens | ${totalToolCalls} tool calls | report: ${reportPath}`
+    );
+    if (!opts?.returnMetadata) return report;
+    const planStatus = planStore.getStatus();
+    return {
+      report,
+      sessionId,
+      steps: s.stepsTaken,
+      tokens: Math.round(s.tokensSpent),
+      toolCalls: totalToolCalls,
+      plan: planStatus.plan ? { subtasks: planStatus.plan.subtasks.map(t => ({ description: t.description, status: t.status })) } : null,
+    };
+  }
 
   while (!budget.isExhausted) {
     const budgetStatus = budget.getStatus();
@@ -86,12 +122,13 @@ export async function runAgent(question: string): Promise<string> {
       logger.warn({ step: budgetStatus.stepsTaken }, 'Budget reserve reached — entering beast mode');
       const beastPrompt = buildBeastModePrompt(question, knowledgeStore.getFindings());
       const beastMessages: LLMMessage[] = [{ role: 'user', content: beastPrompt }];
-      const response = await provider.chat({ static: STATIC_SYSTEM }, beastMessages, [], { maxTokens: 8192 });
+      const response = await provider.chat({ static: STATIC_SYSTEM }, beastMessages, [], { maxTokens: config.maxOutputTokens });
       budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
       const textBlocks = response.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[];
       const report = textBlocks.map(b => b.text).join('\n');
-      logger.info({ path: saveReport(sessionId, question, report) }, 'Report saved');
-      return report;
+      const reportPath = saveReport(sessionId, question, report);
+      logger.info({ path: reportPath }, 'Report saved');
+      return finish(report, reportPath);
     }
 
     const compactResult = compactIfNeeded(messages, lastInputTokens, config.contextWindow);
@@ -101,7 +138,7 @@ export async function runAgent(question: string): Promise<string> {
     }
 
     const llmTools = registry.toLLMTools();
-    const response = await provider.chat({ static: STATIC_SYSTEM }, messages, llmTools, { maxTokens: 4096 });
+    const response = await provider.chat({ static: STATIC_SYSTEM }, messages, llmTools, { maxTokens: config.maxOutputTokens });
     lastInputTokens = response.usage.input_tokens;
     budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
     budget.recordStep();
@@ -124,14 +161,19 @@ export async function runAgent(question: string): Promise<string> {
       'Agent step'
     );
 
+    totalToolCalls += toolUseBlocks.length;
+
     // Natural termination
     if (response.stop_reason === 'end_turn' || toolUseBlocks.length === 0) {
       const finalText = textBlocks.map(b => b.text).join('\n');
       if (finalText.trim()) {
-        logger.info({ step, path: saveReport(sessionId, question, finalText) }, 'Agent completed research naturally');
-        return finalText;
+        const reportPath = saveReport(sessionId, question, finalText);
+        logger.info({ step, path: reportPath }, 'Agent completed research naturally');
+        return finish(finalText, reportPath);
       }
       if (messages.length > 2) break;
+      logger.warn({ step }, 'Empty response on first turn — forcing synthesis');
+      break;
     }
 
     if (toolUseBlocks.length === 0) break;
@@ -173,14 +215,16 @@ export async function runAgent(question: string): Promise<string> {
     { static: STATIC_SYSTEM },
     finalMessages,
     [],
-    { maxTokens: 8192 }
+    { maxTokens: config.maxOutputTokens }
   );
   budget.recordTokens(finalResponse.usage.input_tokens, finalResponse.usage.output_tokens, finalResponse.usage.cache_read_tokens, finalResponse.usage.cache_write_tokens);
+  budget.recordStep();
   const finalText = finalResponse.content
     .filter(b => b.type === 'text')
     .map(b => (b as { type: 'text'; text: string }).text)
     .join('\n');
-  const result = finalText || 'Research session ended without producing a report.';
-  logger.info({ path: saveReport(sessionId, question, result) }, 'Report saved');
-  return result;
+  const report = finalText || 'Research session ended without producing a report.';
+  const reportPath = saveReport(sessionId, question, report);
+  logger.info({ path: reportPath }, 'Report saved');
+  return finish(report, reportPath);
 }
