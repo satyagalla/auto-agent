@@ -1,5 +1,5 @@
 import pino from 'pino';
-import { mkdirSync, existsSync } from 'fs';
+import { mkdirSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 
 const level = process.env.LOG_LEVEL ?? 'info';
@@ -20,6 +20,9 @@ export function createSessionLogger(sessionId: string, context: Record<string, u
   if (!existsSync(traceDir)) mkdirSync(traceDir, { recursive: true });
 
   const logPath = join(traceDir, 'run.log');
+  try {
+    writeFileSync(logPath, Buffer.from([0xef, 0xbb, 0xbf]), { flag: 'wx' });
+  } catch { /* file already exists — skip BOM, preserve existing content */ }
 
   const sessionLogger = pino(
     { level },
