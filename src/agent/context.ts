@@ -39,9 +39,10 @@ export function formatToolResult(
   result: unknown,
   isError: boolean
 ): ContentBlock {
-  const content = isError
-    ? (typeof result === 'string' ? result : String(result))
-    : truncate(JSON.stringify(result), 1000);
+  const content = truncate(
+    isError ? (typeof result === 'string' ? result : String(result)) : JSON.stringify(result),
+    1000
+  );
 
   return {
     type: 'tool_result',
