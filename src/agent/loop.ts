@@ -1,5 +1,5 @@
 import { BedrockProvider } from '../llm/bedrock.js';
-import { buildSystemPrompt, buildBeastModePrompt, formatFindingsList } from '../llm/prompts.js';
+import { buildSystemPrompt, buildBeastModePrompt, formatFindingsList, STATIC_SYSTEM } from '../llm/prompts.js';
 import { BudgetTracker } from '../infra/budget.js';
 import { ArtifactStore } from '../store/artifacts.js';
 import { KnowledgeStore } from '../store/knowledge.js';
@@ -92,14 +92,13 @@ export async function runAgent(question: string): Promise<string> {
     const llmTools = budget.shouldSynthesize ? [] : registry.toLLMTools();
 
     if (budget.shouldSynthesize) {
-      // Beast mode: force synthesis
+      // Beast mode: force synthesis — findings are in beastPrompt, skip dynamic system block
       logger.warn({ step: budgetStatus.stepsTaken }, 'Budget reserve reached — entering beast mode');
-      const beastPrompt = buildBeastModePrompt(knowledgeStore.getFindings());
+      const beastPrompt = buildBeastModePrompt(question, knowledgeStore.getFindings());
       const beastMessages: LLMMessage[] = [
-        ...trimmedMessages,
         { role: 'user', content: beastPrompt },
       ];
-      const response = await provider.chat(systemPrompt, beastMessages, [], { maxTokens: 8192 });
+      const response = await provider.chat({ static: systemPrompt.static }, beastMessages, [], { maxTokens: 8192 });
       budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
       const textBlocks = response.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[];
       const report = textBlocks.map(b => b.text).join('\n');
@@ -166,19 +165,14 @@ export async function runAgent(question: string): Promise<string> {
     messages.push({ role: 'user', content: toolResults as ContentBlock[] });
   }
 
-  // Force synthesis if we exited due to budget
+  // Force synthesis if we exited due to budget — findings are in beastPrompt, skip dynamic system block
   logger.warn({ steps: budget.stepsTaken }, 'Budget exhausted — forcing synthesis');
-  const beastPrompt = buildBeastModePrompt(knowledgeStore.getFindings());
+  const beastPrompt = buildBeastModePrompt(question, knowledgeStore.getFindings());
   const finalMessages: LLMMessage[] = [
-    { role: 'user', content: question },
     { role: 'user', content: beastPrompt },
   ];
   const finalResponse = await provider.chat(
-    buildSystemPrompt({
-      planSummary: planStore.getPlanSummary(),
-      findingsList: formatFindingsList(knowledgeStore.getFindings()),
-      budgetStatus: 'BUDGET EXHAUSTED',
-    }),
+    { static: STATIC_SYSTEM },
     finalMessages,
     [],
     { maxTokens: 8192 }

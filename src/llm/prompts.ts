@@ -1,7 +1,7 @@
 import type { Finding } from '../store/knowledge.js';
 import type { SystemPrompt } from './provider.js';
 
-const STATIC_SYSTEM = `You are a deep research agent. Your job is to research questions thoroughly and produce comprehensive reports.
+export const STATIC_SYSTEM = `You are a deep research agent. Your job is to research questions thoroughly and produce comprehensive reports.
 
 ## How to Work
 
@@ -65,7 +65,7 @@ At the end, respond with a JSON object in this exact format:
 }`;
 }
 
-export function buildBeastModePrompt(findings: Finding[]): string {
+export function buildBeastModePrompt(question: string, findings: Finding[]): string {
   const findingsList = findings
     .slice(0, 80)
     .map((f, i) => `${i + 1}. ${f.fact} (Source: ${f.sourceUrl}, Confidence: ${f.confidence})`)
@@ -73,10 +73,13 @@ export function buildBeastModePrompt(findings: Finding[]): string {
 
   return `You have reached your research budget. Based on the findings gathered so far, produce your final comprehensive research report now. Do not make any more tool calls.
 
+## Research Question
+${question}
+
 ## Findings Gathered
 ${findingsList}
 
-Write a thorough, well-structured markdown report synthesizing all these findings. Include citations, key insights, and conclusions.`;
+Write a thorough, well-structured markdown report answering the research question. Include citations, key insights, and conclusions.`;
 }
 
 export function formatFindingsList(findings: Finding[]): string {
