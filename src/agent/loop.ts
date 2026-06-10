@@ -1,5 +1,5 @@
 import { BedrockProvider } from '../llm/bedrock.js';
-import { buildSystemPrompt, buildBeastModePrompt, formatFindingsList, STATIC_SYSTEM } from '../llm/prompts.js';
+import { buildBeastModePrompt, STATIC_SYSTEM } from '../llm/prompts.js';
 import { BudgetTracker } from '../infra/budget.js';
 import { ArtifactStore } from '../store/artifacts.js';
 import { KnowledgeStore } from '../store/knowledge.js';
@@ -10,7 +10,7 @@ import { join } from 'path';
 import { registry } from '../tools/registry.js';
 import { registerAllTools } from '../tools/register-all.js';
 import { executeTool } from '../tools/executor.js';
-import { buildMessages, formatToolResult } from './context.js';
+import { compactIfNeeded, formatToolResult } from './context.js';
 import { config } from '../infra/config.js';
 import type { LLMMessage, ContentBlock, ToolUseBlock } from '../llm/provider.js';
 import type { ToolContext } from '../tools/types.js';
@@ -53,7 +53,7 @@ export async function runAgent(question: string): Promise<string> {
   };
 
   const provider = new BedrockProvider();
-  const messages: LLMMessage[] = [
+  let messages: LLMMessage[] = [
     { role: 'user', content: question },
   ];
 
@@ -61,7 +61,6 @@ export async function runAgent(question: string): Promise<string> {
 
   // Stuck detection: track last 10 tool calls
   const recentCalls: RecentCall[] = [];
-  let stuckHint: string | undefined;
 
   function checkStuck(calls: { name: string; input: string }[]): boolean {
     for (const call of calls) {
@@ -78,27 +77,16 @@ export async function runAgent(question: string): Promise<string> {
     return false;
   }
 
+  let lastInputTokens = 0;
+
   while (!budget.isExhausted) {
     const budgetStatus = budget.getStatus();
-    const systemPrompt = buildSystemPrompt({
-      planSummary: planStore.getPlanSummary(),
-      findingsList: formatFindingsList(knowledgeStore.getFindings()),
-      budgetStatus: `Steps: ${budgetStatus.stepsTaken}/${config.maxSteps} | Tokens: ${budgetStatus.tokensSpent}/${config.tokenBudget} (${budgetStatus.budgetPctUsed}% used)`,
-      toolHint: stuckHint,
-    });
-    stuckHint = undefined;
-
-    const trimmedMessages = buildMessages(messages);
-    const llmTools = budget.shouldSynthesize ? [] : registry.toLLMTools();
 
     if (budget.shouldSynthesize) {
-      // Beast mode: force synthesis — findings are in beastPrompt, skip dynamic system block
       logger.warn({ step: budgetStatus.stepsTaken }, 'Budget reserve reached — entering beast mode');
       const beastPrompt = buildBeastModePrompt(question, knowledgeStore.getFindings());
-      const beastMessages: LLMMessage[] = [
-        { role: 'user', content: beastPrompt },
-      ];
-      const response = await provider.chat({ static: systemPrompt.static }, beastMessages, [], { maxTokens: 8192 });
+      const beastMessages: LLMMessage[] = [{ role: 'user', content: beastPrompt }];
+      const response = await provider.chat({ static: STATIC_SYSTEM }, beastMessages, [], { maxTokens: 8192 });
       budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
       const textBlocks = response.content.filter(b => b.type === 'text') as { type: 'text'; text: string }[];
       const report = textBlocks.map(b => b.text).join('\n');
@@ -106,7 +94,15 @@ export async function runAgent(question: string): Promise<string> {
       return report;
     }
 
-    const response = await provider.chat(systemPrompt, trimmedMessages, llmTools, { maxTokens: 4096 });
+    const compactResult = compactIfNeeded(messages, lastInputTokens, config.contextWindow);
+    if (compactResult.compacted) {
+      messages = compactResult.messages;
+      logger.warn({ step: budgetStatus.stepsTaken, lastInputTokens }, 'Context compacted: middle tool results stubbed');
+    }
+
+    const llmTools = registry.toLLMTools();
+    const response = await provider.chat({ static: STATIC_SYSTEM }, messages, llmTools, { maxTokens: 4096 });
+    lastInputTokens = response.usage.input_tokens;
     budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
     budget.recordStep();
 
@@ -123,6 +119,7 @@ export async function runAgent(question: string): Promise<string> {
         cacheReadTokens: response.usage.cache_read_tokens,
         cacheWriteTokens: response.usage.cache_write_tokens,
         tokensTotal: budget.tokensSpent,
+        contextTokens: lastInputTokens,
       },
       'Agent step'
     );
@@ -134,20 +131,12 @@ export async function runAgent(question: string): Promise<string> {
         logger.info({ step, path: saveReport(sessionId, question, finalText) }, 'Agent completed research naturally');
         return finalText;
       }
-      // If no text, continue loop (model might have just not produced output yet)
       if (messages.length > 2) break;
     }
 
     if (toolUseBlocks.length === 0) break;
 
     messages.push({ role: 'assistant', content: response.content });
-
-    // Stuck detection
-    const stuck = checkStuck(toolUseBlocks.map(b => ({ name: b.name, input: JSON.stringify(b.input).slice(0, 100) })));
-    if (stuck) {
-      stuckHint = "You've attempted a similar action multiple times without new results. Try a different approach, different search queries, or move to a different subtask.";
-      logger.warn({ step }, 'Stuck detection triggered');
-    }
 
     // Execute all tool calls in parallel
     const toolResults = await Promise.all(
@@ -163,6 +152,15 @@ export async function runAgent(question: string): Promise<string> {
     );
 
     messages.push({ role: 'user', content: toolResults as ContentBlock[] });
+
+    // Stuck detection: inject guidance AFTER tool_results so tool_use/tool_result adjacency is preserved.
+    // Uses assistant→user alternation: the guidance becomes the next assistant turn, prompting a new user turn.
+    const stuck = checkStuck(toolUseBlocks.map(b => ({ name: b.name, input: JSON.stringify(b.input).slice(0, 100) })));
+    if (stuck) {
+      logger.warn({ step }, 'Stuck detection triggered');
+      messages.push({ role: 'assistant', content: [{ type: 'text', text: '[Guidance] You have repeated the same action multiple times without new results. Try a different approach, different search queries, or move to a different subtask.' }] });
+      messages.push({ role: 'user', content: 'Understood — changing approach.' });
+    }
   }
 
   // Force synthesis if we exited due to budget — findings are in beastPrompt, skip dynamic system block

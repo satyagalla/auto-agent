@@ -56,10 +56,7 @@ export const config = {
     github: { maxRequests: 60, windowMs: 3_600_000 },
     default: { maxRequests: 10, windowMs: 60_000 },
   },
-  context: {
-    maxMessages: 40,
-    keepRecentMessages: 8,
-  },
+  contextWindow: 200_000,
   subagent: {
     maxSteps: 15,
     maxTokens: 50_000,

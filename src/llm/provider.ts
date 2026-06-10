@@ -52,6 +52,6 @@ export interface LLMProvider {
     system: SystemPrompt,
     messages: LLMMessage[],
     tools: ToolDefinition[],
-    options?: { maxTokens?: number }
+    options?: { maxTokens?: number; model?: string }
   ): Promise<LLMResponse>;
 }

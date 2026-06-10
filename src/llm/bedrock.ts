@@ -34,12 +34,32 @@ export class BedrockProvider implements LLMProvider {
     system: SystemPrompt,
     messages: LLMMessage[],
     tools: ToolDefinition[],
-    options?: { maxTokens?: number }
+    options?: { maxTokens?: number; model?: string }
   ): Promise<LLMResponse> {
     await rateLimiters.default.acquire();
 
     return withRetry(async () => {
       const bedrockMessages = messages.map(m => this.toBedrockMessage(m));
+
+      // Inject cachePoint into second-to-last user message to cache conversation prefix.
+      // Skip if conversation is too short (no prior user turn to cache), or caching is disabled.
+      if (!system.noCachePoints && bedrockMessages.length >= 3) {
+        // Walk backwards from end, skipping the last message, find first user message.
+        let targetIdx = -1;
+        for (let i = bedrockMessages.length - 2; i >= 0; i--) {
+          if (bedrockMessages[i].role === 'user') {
+            targetIdx = i;
+            break;
+          }
+        }
+        if (targetIdx !== -1) {
+          const target = bedrockMessages[targetIdx];
+          bedrockMessages[targetIdx] = {
+            ...target,
+            content: [...(target.content ?? []), { cachePoint: { type: 'default' as const } }] as BedrockContentBlock[],
+          };
+        }
+      }
 
       const bedrockTools: Tool[] = tools.map(t => ({
         toolSpec: {
@@ -49,16 +69,20 @@ export class BedrockProvider implements LLMProvider {
         },
       }));
 
-      // Cache static system + tools only when dynamic content follows the cache point
-      // (a trailing cachePoint with nothing after it is semantically wrong).
-      // noCachePoints disables caching entirely for callers with fully dynamic prompts.
-      const useCache = !system.noCachePoints && !!system.dynamic;
+      // Cache the system prompt and tools. When there is a dynamic section, the cachePoint sits
+      // between static and dynamic so only the stable prefix is cached. When the prompt is fully
+      // static (no dynamic), the cachePoint trails the static block — valid because nothing follows
+      // it in the system array and the static content itself is the cacheable unit.
+      // noCachePoints disables all caching for callers that don't want cache write charges.
+      const useCache = !system.noCachePoints;
       const systemBlocks = useCache
-        ? [{ text: system.static }, { cachePoint: { type: 'default' as const } }, { text: system.dynamic! }]
+        ? system.dynamic
+          ? [{ text: system.static }, { cachePoint: { type: 'default' as const } }, { text: system.dynamic }]
+          : [{ text: system.static }, { cachePoint: { type: 'default' as const } }]
         : [{ text: system.static + (system.dynamic ? '\n\n' + system.dynamic : '') }];
 
       const command = new ConverseCommand({
-        modelId: config.model,
+        modelId: options?.model ?? config.model,
         system: systemBlocks as ConverseCommandInput['system'],
         messages: bedrockMessages,
         toolConfig: tools.length > 0

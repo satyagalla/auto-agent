@@ -1,5 +1,4 @@
 import type { Finding } from '../store/knowledge.js';
-import type { SystemPrompt } from './provider.js';
 
 export const STATIC_SYSTEM = `You are a deep research agent. Your job is to research questions thoroughly and produce comprehensive reports.
 
@@ -27,23 +26,6 @@ export const STATIC_SYSTEM = `You are a deep research agent. Your job is to rese
 - output_* : Write reports and exports
 - agent_* : Delegate to subagents`;
 
-export function buildSystemPrompt(params: {
-  planSummary: string;
-  findingsList: string;
-  budgetStatus: string;
-  toolHint?: string;
-}): SystemPrompt {
-  const dynamic = `## Current Plan
-${params.planSummary}
-
-## Accumulated Findings
-${params.findingsList || 'No findings recorded yet.'}
-
-## Budget Status
-${params.budgetStatus}${params.toolHint ? `\n\n## Guidance\n${params.toolHint}` : ''}`;
-
-  return { static: STATIC_SYSTEM, dynamic };
-}
 
 export function buildSubagentPrompt(subtopic: string, parentQuestion: string, visitedUrls: string[]): string {
   const visited = visitedUrls.length > 0
@@ -82,11 +64,3 @@ ${findingsList}
 Write a thorough, well-structured markdown report answering the research question. Include citations, key insights, and conclusions.`;
 }
 
-export function formatFindingsList(findings: Finding[]): string {
-  if (findings.length === 0) return 'No findings recorded yet.';
-  return findings
-    .filter(f => !f.outdated)
-    .slice(-50)
-    .map((f, i) => `${i + 1}. [${f.confidence}] ${f.fact} (${f.sourceUrl})`)
-    .join('\n');
-}
