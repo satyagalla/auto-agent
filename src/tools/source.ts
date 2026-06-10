@@ -12,9 +12,27 @@ export const sourceTools: AgentToolDefinition[] = [
     retryable: true,
     rateLimitKey: 'default',
     async execute(input, ctx) {
-      const res = await fetch(input.url, { signal: AbortSignal.timeout(30000) });
+      const MAX_PDF_BYTES = 10 * 1024 * 1024;
+      const res = await fetch(input.url, { signal: AbortSignal.timeout(20000) });
       if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
-      const buffer = Buffer.from(await res.arrayBuffer());
+      const contentLength = parseInt(res.headers.get('content-length') ?? '0', 10);
+      if (contentLength > MAX_PDF_BYTES) throw new ToolExecutionError(`PDF too large: ${Math.round(contentLength / 1024 / 1024)}MB (limit 10MB)`);
+
+      if (!res.body) throw new ToolExecutionError('PDF response has no body');
+      const reader = res.body.getReader();
+      const chunks: Uint8Array[] = [];
+      let totalBytes = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        totalBytes += value.length;
+        if (totalBytes > MAX_PDF_BYTES) {
+          reader.cancel();
+          throw new ToolExecutionError(`PDF too large: >${Math.round(MAX_PDF_BYTES / 1024 / 1024)}MB (limit 10MB)`);
+        }
+        chunks.push(value);
+      }
+      const buffer = Buffer.concat(chunks);
       let text = '';
       let pageCount = 0;
       try {
