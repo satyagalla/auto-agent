@@ -1,6 +1,11 @@
 import { z } from 'zod';
 import type { AgentToolDefinition } from './types.js';
 
+const tagsField = z.preprocess(
+  v => (typeof v === 'string' ? [v] : Array.isArray(v) ? v : undefined),
+  z.array(z.string())
+).optional();
+
 export const knowledgeTools: AgentToolDefinition[] = [
   {
     name: 'knowledge_add_finding',
@@ -11,7 +16,7 @@ export const knowledgeTools: AgentToolDefinition[] = [
       source_url: z.string(),
       confidence: z.enum(['high', 'medium', 'low']),
       subtask_id: z.string().optional(),
-      tags: z.array(z.string()).optional(),
+      tags: tagsField,
     }),
     async execute(input, ctx) {
       const id = ctx.knowledgeStore.addFinding(input.fact, input.source_url, input.confidence, input.subtask_id, input.tags);
@@ -39,7 +44,7 @@ export const knowledgeTools: AgentToolDefinition[] = [
     description: 'Search recorded findings by keyword, tags, or subtask.',
     inputSchema: z.object({
       query: z.string().optional(),
-      tags: z.array(z.string()).optional(),
+      tags: tagsField,
       subtask_id: z.string().optional(),
     }),
     async execute(input, ctx) {
