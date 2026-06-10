@@ -1,3 +1,5 @@
+Claude hallucinated and filled the doc with code when prompted for only instructions
+
 # Implementation Guide
 
 This document contains step-by-step instructions for building the deep research agent. Follow in order — each step builds on the previous.
