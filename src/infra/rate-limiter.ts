@@ -32,5 +32,6 @@ export const rateLimiters: Record<string, RateLimiter> = {
   tavily: new RateLimiter(20, 60_000),
   jina: new RateLimiter(20, 60_000),
   github: new RateLimiter(60, 3_600_000),
-  default: new RateLimiter(10, 60_000),
+  bedrock: new RateLimiter(12, 60_000),
+  default: new RateLimiter(30, 60_000),
 };

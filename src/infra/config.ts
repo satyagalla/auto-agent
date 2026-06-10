@@ -43,6 +43,7 @@ export const config = {
   },
   model: 'us.anthropic.claude-sonnet-4-6',
   maxSteps: 50,
+  maxOutputTokens: 8192,
   tokenBudget: 200_000,
   budgetReservePercent: 15,
   retry: {
@@ -54,11 +55,13 @@ export const config = {
     tavily: { maxRequests: 20, windowMs: 60_000 },
     jina: { maxRequests: 20, windowMs: 60_000 },
     github: { maxRequests: 60, windowMs: 3_600_000 },
-    default: { maxRequests: 10, windowMs: 60_000 },
+    bedrock: { maxRequests: 12, windowMs: 60_000 },
+    default: { maxRequests: 30, windowMs: 60_000 },
   },
   contextWindow: 200_000,
   subagent: {
     maxSteps: 15,
     maxTokens: 50_000,
+    maxOutputTokens: 8192,
   },
 };

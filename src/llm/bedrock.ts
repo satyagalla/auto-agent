@@ -36,7 +36,7 @@ export class BedrockProvider implements LLMProvider {
     tools: ToolDefinition[],
     options?: { maxTokens?: number; model?: string }
   ): Promise<LLMResponse> {
-    await rateLimiters.default.acquire();
+    await rateLimiters.bedrock.acquire();
 
     return withRetry(async () => {
       const bedrockMessages = messages.map(m => this.toBedrockMessage(m));
@@ -92,7 +92,7 @@ export class BedrockProvider implements LLMProvider {
             } as ConverseCommandInput['toolConfig']
           : undefined,
         inferenceConfig: {
-          maxTokens: options?.maxTokens ?? 4096,
+          maxTokens: options?.maxTokens ?? config.maxOutputTokens,
         },
       });
 

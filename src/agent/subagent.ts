@@ -68,7 +68,7 @@ export async function spawnSubagent(params: {
   logger.info({ mode: params.mode }, 'Subagent started');
 
   while (!budget.isExhausted && steps < (params.maxSteps ?? config.subagent.maxSteps)) {
-    const response = await provider.chat(systemPrompt, messages, llmTools, { maxTokens: 2048 });
+    const response = await provider.chat(systemPrompt, messages, llmTools, { maxTokens: config.subagent.maxOutputTokens });
     budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
     budget.recordStep();
     steps++;
