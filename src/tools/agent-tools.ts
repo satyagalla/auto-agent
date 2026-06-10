@@ -23,6 +23,7 @@ export const agentTools: AgentToolDefinition[] = [
         depth: input.depth,
         maxSteps: input.max_steps,
         mode: 'research',
+        logger: ctx.logger,
       });
     },
   },
@@ -39,6 +40,7 @@ export const agentTools: AgentToolDefinition[] = [
         parentQuestion: input.claim,
         mode: 'verify',
         maxSteps: 8,
+        logger: ctx.logger,
       });
 
       const evidenceFor = result.findings.filter(f => f.confidence === 'high' || f.confidence === 'medium');

@@ -6,10 +6,10 @@ import { executeTool } from '../tools/executor.js';
 import { ArtifactStore } from '../store/artifacts.js';
 import { KnowledgeStore } from '../store/knowledge.js';
 import { PlanStore } from '../store/plan.js';
-import { createChildLogger } from '../infra/logger.js';
 import { config } from '../infra/config.js';
 import type { LLMMessage, ContentBlock, ToolUseBlock } from '../llm/provider.js';
 import type { ToolContext } from '../tools/types.js';
+import type { Logger } from 'pino';
 
 export interface SubagentResult {
   findings: { fact: string; source: string; confidence: string }[];
@@ -29,9 +29,10 @@ export async function spawnSubagent(params: {
   depth?: 'standard' | 'thorough';
   maxSteps?: number;
   mode: 'research' | 'verify';
+  logger: Logger;
 }): Promise<SubagentResult> {
   const sessionId = `sub_${Date.now()}`;
-  const logger = createChildLogger({ sessionId, subtopic: params.subtopic });
+  const logger = params.logger.child({ subagentId: sessionId, subtopic: params.subtopic.slice(0, 80) });
   const artifactStore = new ArtifactStore(sessionId);
   const knowledgeStore = new KnowledgeStore();
   const planStore = new PlanStore();
@@ -64,6 +65,8 @@ export async function spawnSubagent(params: {
   let steps = 0;
   let finalText = '';
 
+  logger.info({ mode: params.mode }, 'Subagent started');
+
   while (!budget.isExhausted && steps < (params.maxSteps ?? config.subagent.maxSteps)) {
     const response = await provider.chat(systemPrompt, messages, llmTools, { maxTokens: 2048 });
     budget.recordTokens(response.usage.input_tokens, response.usage.output_tokens, response.usage.cache_read_tokens, response.usage.cache_write_tokens);
@@ -72,6 +75,17 @@ export async function spawnSubagent(params: {
 
     const textBlocks = response.content.filter((b): b is { type: 'text'; text: string } => b.type === 'text');
     const toolUseBlocks = response.content.filter((b): b is ToolUseBlock => b.type === 'tool_use');
+
+    logger.info(
+      {
+        step: steps,
+        stopReason: response.stop_reason,
+        toolCalls: toolUseBlocks.map(b => b.name),
+        tokensThisCall: response.usage.input_tokens + response.usage.output_tokens,
+        cacheReadTokens: response.usage.cache_read_tokens,
+      },
+      'Subagent step'
+    );
 
     if (textBlocks.length > 0) {
       finalText = textBlocks.map(b => b.text).join('\n');
@@ -105,8 +119,9 @@ export async function spawnSubagent(params: {
     messages.push({ role: 'user', content: toolResults as ContentBlock[] });
   }
 
-  // Parse structured result from final text
-  return parseSubagentResult(finalText, knowledgeStore);
+  const result = parseSubagentResult(finalText, knowledgeStore);
+  logger.info({ steps, findingsCount: result.findings.length }, 'Subagent completed');
+  return result;
 }
 
 function parseSubagentResult(text: string, knowledgeStore: KnowledgeStore): SubagentResult {
