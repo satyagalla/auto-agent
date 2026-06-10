@@ -23,13 +23,24 @@ async function tavilySearch(query: string, maxResults: number, type: string, day
 }
 
 async function extractPageText(url: string): Promise<{ text: string; title: string; byline?: string }> {
-  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 ResearchAgent/1.0' }, signal: AbortSignal.timeout(10000) });
+  const res = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 ResearchAgent/1.0' }, signal: AbortSignal.timeout(8000) });
   if (!res.ok) throw new ApiError(`HTTP ${res.status}`, res.status);
-  const html = await res.text();
+  const buffer = await res.arrayBuffer();
+  const charsetRaw = res.headers.get('content-type')?.match(/charset=([^\s;]+)/i)?.[1] ?? 'utf-8';
+  let html: string;
+  try {
+    html = new TextDecoder(charsetRaw).decode(buffer);
+  } catch {
+    html = new TextDecoder('utf-8').decode(buffer);
+  }
   const $ = cheerio.load(html);
   $('script, style, nav, header, footer, aside, .ads, .advertisement, .cookie-notice').remove();
   const title = $('title').text().trim() || $('h1').first().text().trim();
-  const byline = $('[class*="author"], [class*="byline"], [rel="author"]').first().text().trim() || undefined;
+  // Restrict to inline/small elements to avoid matching large container divs.
+  // Normalize whitespace and discard anything that looks like a layout dump (>120 chars).
+  const bylineRaw = $('a[rel="author"], [class="author"], [class="byline"], span[class*="author"], span[class*="byline"], p[class*="author"], p[class*="byline"]')
+    .first().text().replace(/\s+/g, ' ').trim();
+  const byline = bylineRaw && bylineRaw.length <= 120 ? bylineRaw : undefined;
   const article = $('article, main, [role="main"], .content, .post-content, .entry-content').first();
   const text = (article.length ? article : $('body')).text().replace(/\s+/g, ' ').trim();
   return { text, title, byline };
@@ -38,7 +49,7 @@ async function extractPageText(url: string): Promise<{ text: string; title: stri
 async function jinaFetch(url: string): Promise<string> {
   const res = await fetch(`https://r.jina.ai/${url}`, {
     headers: { 'User-Agent': 'ResearchAgent/1.0' },
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(12000),
   });
   if (!res.ok) throw new ApiError(`Jina error: ${res.status}`, res.status);
   return res.text();
