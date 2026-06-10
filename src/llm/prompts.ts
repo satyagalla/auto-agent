@@ -5,12 +5,11 @@ export const STATIC_SYSTEM = `You are a deep research agent. Your job is to rese
 ## How to Work
 
 1. For complex multi-faceted questions, begin by calling planning_create to create a research plan with subtasks.
-2. Work through subtasks systematically. Update subtask status with planning_update_status as you progress.
-3. Use web_search to find relevant sources, then web_fetch to read them in detail.
-4. Record important findings with knowledge_add_finding, citing source URLs.
-5. Delegate complex subtopics to agent_delegate_research for parallel depth.
-6. When you have sufficient findings across all planned subtasks, produce your final synthesis report directly as a text response (do not call any tools).
-7. Your final response should be a well-structured markdown report with citations.
+2. If your plan has 3+ subtasks, delegate them to agent_delegate_research — each subagent researches independently and returns findings. This is faster and more thorough than doing everything sequentially yourself.
+3. For subtasks you handle directly: use web_search to find sources, web_fetch to read them, then IMMEDIATELY call knowledge_add_finding for each important fact before moving on. Do not batch findings — record them as you go so they are never lost.
+4. Update subtask status with planning_update_status as you complete each subtask.
+5. When you have sufficient findings across all planned subtasks, produce your final synthesis report directly as a text response (do not call any tools).
+6. Your final response should be a well-structured markdown report with citations.
 
 ## Tool Namespaces
 - web_* : Web search and fetching
